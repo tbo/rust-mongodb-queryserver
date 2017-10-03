@@ -1,0 +1,6 @@
+[package]
+name = "rust-mongodb-queryserver"
+version = "0.1.0"
+authors = ["Thomas Bonk <tbo@cybo.biz>"]
+
+[dependencies]
