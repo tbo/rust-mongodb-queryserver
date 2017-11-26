@@ -17,6 +17,7 @@ use std::process;
 use std::sync::Arc;
 use mongodb::{Client, ThreadedClient};
 use mongodb::db::{ThreadedDatabase, DatabaseInner};
+use mongodb::coll::options::FindOptions;
 
 use hyper::{Get, StatusCode};
 use hyper::header::ContentLength;
@@ -34,30 +35,26 @@ impl<'a> Service for QueryService<'a> {
 
     fn call(&self, req: Request) -> Self::Future {
         futures::future::ok(match (req.method(), req.path()) {
-            (&Get, "/") | (&Get, "/echo") => {
-                let doc = doc! { "_id" => "/jeans"};
+            (&Get, "/") => {
+                let doc = doc! { "locale" => "de"};
                 let collection = self.db.collection("routes");
-                let result = collection.find_one(Some(doc), None).unwrap().unwrap();
-                let content = bson::Bson::Document(result).to_string();
-                // let content = match serde_json::to_string(
-                //     bson::from_bson(result).unwrap()
-                //     ) {
-                //     Ok(v) => v,
-                //     Err(_) => String::from("0")
-                // };
-                // let content = result.unwrap().clone();
-                // let docType = match result.get_str("type") {
-                //     Err(_) => "",
-                //     Ok(v) => v
-                // };
-                Response::new()
-                    .with_header(ContentLength(content.len() as u64))
-                    .with_body(content)
+                let mut opts = FindOptions::new();
+                opts.limit = Some(10);
+                match collection.find(Some(doc), Some(opts)) {
+                    Ok(result) => {
+                        let documents: Vec<String> = result
+                            .map(|item| bson::Bson::Document(item.unwrap()).to_string())
+                            .collect();
+                        let output = format!("[{}]", documents.join(","));
+                        Response::new()
+                            .with_header(ContentLength(output.len() as u64))
+                            .with_body(output)
+                    },
+                    Err(_) => Response::new().with_status(StatusCode::InternalServerError),
+                }
             },
             _ => {
-                Response::new()
-                    .with_status(StatusCode::NotFound)
-                    .with_body("blub")
+                Response::new().with_status(StatusCode::NotFound)
             }
         })
     }
@@ -110,7 +107,7 @@ fn get_configuration() -> ArgMatches<'static> {
 }
 
 fn create_database_connection(config: &ArgMatches) -> Arc<DatabaseInner> {
-    let connection = config.value_of("connection").unwrap_or("mongodb://127.0.0.1:27017/staging");
+    let connection = config.value_of("connection").unwrap_or("mongodb://127.0.0.1:27017/");
     let client = match Client::with_uri(connection) {
         Err(_) => {
             println!("Unable to connect to {}", connection);
