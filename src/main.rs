@@ -10,6 +10,7 @@ extern crate mongodb;
 
 extern crate serde;
 extern crate serde_json;
+extern crate url;
 
 use clap::{Arg, App, ArgMatches};
 use futures::future::FutureResult;
@@ -22,6 +23,7 @@ use mongodb::coll::options::FindOptions;
 use hyper::{Get, StatusCode};
 use hyper::header::ContentLength;
 use hyper::server::{Http, Service, Request, Response};
+use std::collections::HashMap;
 
 struct QueryService<'a> {
     db: &'a Arc<DatabaseInner>
@@ -36,10 +38,13 @@ impl<'a> Service for QueryService<'a> {
     fn call(&self, req: Request) -> Self::Future {
         futures::future::ok(match (req.method(), req.path()) {
             (&Get, "/") => {
+                let query = req.query().unwrap().as_bytes();
+                let params: HashMap<_, _> = url::form_urlencoded::parse(query).into_owned().collect();
                 let doc = doc! { "locale" => "de"};
                 let collection = self.db.collection("routes");
                 let mut opts = FindOptions::new();
-                opts.limit = Some(10);
+                opts.limit = get_number_or(params.get("limit"), Some(20));
+                opts.skip = get_number_or(params.get("skip"), None);
                 match collection.find(Some(doc), Some(opts)) {
                     Ok(result) => {
                         let documents: Vec<String> = result
@@ -58,6 +63,15 @@ impl<'a> Service for QueryService<'a> {
             }
         })
     }
+}
+
+fn get_number_or(query_option: Option<&String>, default: Option<i64>) -> Option<i64> {
+    if let Some(limit_string) = query_option {
+        if let Ok(limit) = limit_string.parse::<i64>() {
+            return Some(limit);
+        } 
+    }
+    return default
 }
 
 fn get_configuration() -> ArgMatches<'static> {
