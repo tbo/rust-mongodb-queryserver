@@ -19,11 +19,13 @@ use std::sync::Arc;
 use mongodb::{Client, ThreadedClient};
 use mongodb::db::{ThreadedDatabase, DatabaseInner};
 use mongodb::coll::options::FindOptions;
+use serde_json::Value;
 
 use hyper::{Get, StatusCode};
 use hyper::header::ContentLength;
 use hyper::server::{Http, Service, Request, Response};
 use std::collections::HashMap;
+use std::error::Error;
 
 struct QueryService<'a> {
     db: &'a Arc<DatabaseInner>
@@ -40,11 +42,15 @@ impl<'a> Service for QueryService<'a> {
             (&Get, "/") => {
                 let query = req.query().unwrap().as_bytes();
                 let params: HashMap<_, _> = url::form_urlencoded::parse(query).into_owned().collect();
-                let doc = doc! { "locale" => "de"};
+                let mut doc = doc! { "locale" => "de"};
                 let collection = self.db.collection("routes");
                 let mut opts = FindOptions::new();
                 opts.limit = get_number_or(params.get("limit"), Some(20));
                 opts.skip = get_number_or(params.get("skip"), None);
+                match to_bson_document(params.get("sort")) {
+                    Ok(v) => opts.sort = v,
+                    Err(_) => return futures::future::ok(Response::new().with_status(StatusCode::BadRequest))
+                }
                 match collection.find(Some(doc), Some(opts)) {
                     Ok(result) => {
                         let documents: Vec<String> = result
@@ -63,6 +69,17 @@ impl<'a> Service for QueryService<'a> {
             }
         })
     }
+}
+
+fn to_bson_document(query_option: Option<&String>) -> Result<Option<bson::ordered::OrderedDocument>, Box<Error>> {
+    if let Some(query_string) = query_option {
+        let json: Value = serde_json::from_str(query_string)?;
+        let bson_value = bson::to_bson(&json)?;
+        if let Some(bson_document) = bson_value.as_document() {
+            return Ok(Some((*bson_document).clone()))
+        }
+    }
+    Ok(None)
 }
 
 fn get_number_or(query_option: Option<&String>, default: Option<i64>) -> Option<i64> {
