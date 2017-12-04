@@ -49,7 +49,7 @@ impl<'a> Service for QueryService<'a> {
                 opts.skip = get_number_or(params.get("skip"), None);
                 match to_bson_document(params.get("sort")) {
                     Ok(v) => opts.sort = v,
-                    Err(_) => return futures::future::ok(Response::new().with_status(StatusCode::BadRequest))
+                    Err(_) => return get_failure_response(StatusCode::BadRequest)
                 }
                 match collection.find(Some(doc), Some(opts)) {
                     Ok(result) => {
@@ -61,7 +61,7 @@ impl<'a> Service for QueryService<'a> {
                             .with_header(ContentLength(output.len() as u64))
                             .with_body(output)
                     },
-                    Err(_) => Response::new().with_status(StatusCode::InternalServerError),
+                    Err(_) => return get_failure_response(StatusCode::InternalServerError),
                 }
             },
             _ => {
@@ -69,6 +69,10 @@ impl<'a> Service for QueryService<'a> {
             }
         })
     }
+}
+
+fn get_failure_response(code: StatusCode) -> FutureResult<Response, hyper::Error> {
+    futures::future::ok(Response::new().with_status(code))
 }
 
 fn to_bson_document(query_option: Option<&String>) -> Result<Option<bson::ordered::OrderedDocument>, Box<Error>> {
