@@ -4,13 +4,13 @@ extern crate futures;
 extern crate hyper;
 extern crate pretty_env_logger;
 extern crate clap;
-#[macro_use(bson, doc)]
 extern crate bson;
 extern crate mongodb;
 
 extern crate serde;
 extern crate serde_json;
 extern crate url;
+extern crate regex;
 
 use clap::{Arg, App, ArgMatches};
 use futures::future::FutureResult;
@@ -20,7 +20,7 @@ use mongodb::{Client, ThreadedClient};
 use mongodb::db::{ThreadedDatabase, DatabaseInner};
 use mongodb::coll::options::FindOptions;
 use serde_json::Value;
-
+use regex::Regex;
 use hyper::{Get, StatusCode};
 use hyper::header::ContentLength;
 use hyper::server::{Http, Service, Request, Response};
@@ -39,11 +39,15 @@ impl<'a> Service for QueryService<'a> {
 
     fn call(&self, req: Request) -> Self::Future {
         futures::future::ok(match (req.method(), req.path()) {
-            (&Get, "/") => {
+            (&Get, path) => {
+                let re = Regex::new(r"^/([[:alpha:]]*)/?$").unwrap();
+                let collection = match re.captures(path) {
+                    Some(caps) => caps.get(1).map_or("", |m| m.as_str()),
+                    None => return get_failure_response(StatusCode::BadRequest)
+                };
                 let query = req.query().unwrap().as_bytes();
                 let params: HashMap<_, _> = url::form_urlencoded::parse(query).into_owned().collect();
-                let mut doc = doc! { "locale" => "de"};
-                let collection = self.db.collection("routes");
+                let collection = self.db.collection(collection);
                 let mut opts = FindOptions::new();
                 opts.limit = get_number_or(params.get("limit"), Some(20));
                 opts.skip = get_number_or(params.get("skip"), None);
@@ -51,7 +55,11 @@ impl<'a> Service for QueryService<'a> {
                     Ok(v) => opts.sort = v,
                     Err(_) => return get_failure_response(StatusCode::BadRequest)
                 }
-                match collection.find(Some(doc), Some(opts)) {
+                let query = match to_bson_document(params.get("query")) {
+                    Ok(v) => v,
+                    Err(_) => return get_failure_response(StatusCode::BadRequest)
+                };
+                match collection.find(query, Some(opts)) {
                     Ok(result) => {
                         let documents: Vec<String> = result
                             .map(|item| bson::Bson::Document(item.unwrap()).to_string())
