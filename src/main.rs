@@ -41,7 +41,7 @@ impl<'a> Service for QueryService<'a> {
         if req.method() != &Get {
             return get_failure_response(StatusCode::NotFound);
         }
-        let collection_regex = Regex::new(r"^/([[:alpha:]]*)/?$").unwrap();
+        let collection_regex = Regex::new(r"^/([[:alpha:]_-]*)/?$").unwrap();
         let collection = match collection_regex.captures(req.path()) {
             Some(collection_match) => collection_match.get(1).map_or("", |m| m.as_str()),
             None => return get_failure_response(StatusCode::BadRequest)
