@@ -38,43 +38,41 @@ impl<'a> Service for QueryService<'a> {
     type Future = FutureResult<Response, hyper::Error>;
 
     fn call(&self, req: Request) -> Self::Future {
-        futures::future::ok(match (req.method(), req.path()) {
-            (&Get, path) => {
-                let re = Regex::new(r"^/([[:alpha:]]*)/?$").unwrap();
-                let collection = match re.captures(path) {
-                    Some(caps) => caps.get(1).map_or("", |m| m.as_str()),
-                    None => return get_failure_response(StatusCode::BadRequest)
-                };
-                let params = get_query_params(&req);
-                let collection = self.db.collection(collection);
-                let mut opts = FindOptions::new();
-                opts.limit = get_number_or(params.get("limit"), Some(20));
-                opts.skip = get_number_or(params.get("skip"), None);
-                match to_bson_document(params.get("sort")) {
-                    Ok(v) => opts.sort = v,
-                    Err(_) => return get_failure_response(StatusCode::BadRequest)
-                }
-                let query = match to_bson_document(params.get("query")) {
-                    Ok(v) => v,
-                    Err(_) => return get_failure_response(StatusCode::BadRequest)
-                };
-                match collection.find(query, Some(opts)) {
-                    Ok(result) => {
-                        let documents: Vec<String> = result
-                            .map(|item| bson::Bson::Document(item.unwrap()).to_string())
-                            .collect();
-                        let output = format!("[{}]", documents.join(","));
-                        Response::new()
-                            .with_header(ContentLength(output.len() as u64))
-                            .with_body(output)
-                    },
-                    Err(_) => return get_failure_response(StatusCode::InternalServerError),
-                }
+        if req.method() != &Get {
+            return get_failure_response(StatusCode::NotFound);
+        }
+        let collection_regex = Regex::new(r"^/([[:alpha:]]*)/?$").unwrap();
+        let collection = match collection_regex.captures(req.path()) {
+            Some(collection_match) => collection_match.get(1).map_or("", |m| m.as_str()),
+            None => return get_failure_response(StatusCode::BadRequest)
+        };
+        let params = get_query_params(&req);
+        let collection = self.db.collection(collection);
+        let mut opts = FindOptions::new();
+        opts.limit = get_number_or(params.get("limit"), Some(20));
+        opts.skip = get_number_or(params.get("skip"), None);
+        match to_bson_document(params.get("sort")) {
+            Ok(v) => opts.sort = v,
+            Err(_) => return get_failure_response(StatusCode::BadRequest)
+        }
+        let query = match to_bson_document(params.get("query")) {
+            Ok(v) => v,
+            Err(_) => return get_failure_response(StatusCode::BadRequest)
+        };
+        match collection.find(query, Some(opts)) {
+            Ok(result) => {
+                let documents: Vec<String> = result
+                    .map(|item| bson::Bson::Document(item.unwrap()).to_string())
+                    .collect();
+                let output = format!("[{}]", documents.join(","));
+                return futures::future::ok(
+                    Response::new()
+                    .with_header(ContentLength(output.len() as u64))
+                    .with_body(output)
+                )
             },
-            _ => {
-                Response::new().with_status(StatusCode::NotFound)
-            }
-        })
+            Err(_) => return get_failure_response(StatusCode::InternalServerError),
+        }
     }
 }
 
