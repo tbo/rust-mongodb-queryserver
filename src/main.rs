@@ -45,8 +45,7 @@ impl<'a> Service for QueryService<'a> {
                     Some(caps) => caps.get(1).map_or("", |m| m.as_str()),
                     None => return get_failure_response(StatusCode::BadRequest)
                 };
-                let query = req.query().unwrap().as_bytes();
-                let params: HashMap<_, _> = url::form_urlencoded::parse(query).into_owned().collect();
+                let params = get_query_params(&req);
                 let collection = self.db.collection(collection);
                 let mut opts = FindOptions::new();
                 opts.limit = get_number_or(params.get("limit"), Some(20));
@@ -76,6 +75,13 @@ impl<'a> Service for QueryService<'a> {
                 Response::new().with_status(StatusCode::NotFound)
             }
         })
+    }
+}
+
+fn get_query_params(request: &Request) -> HashMap<String, String> {
+    match request.query() {
+        Some(v) => url::form_urlencoded::parse(v.as_bytes()).into_owned().collect(),
+        None => HashMap::new()
     }
 }
 
